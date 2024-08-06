@@ -1,5 +1,7 @@
-import logging
+mport logging
 import csv
+import base64
+import requests
 from telegram import Update, KeyboardButton, ReplyKeyboardMarkup, InputFile
 from telegram.ext import filters, Application, CommandHandler, MessageHandler, CallbackContext, ConversationHandler
 
@@ -12,20 +14,52 @@ logger = logging.getLogger(__name__)
 # Этапы диалога
 NAME, PHONE, ROLE, MARKETPLACE, MANAGEMENT, TEAM, ISSUES, ISSUES_DESCRIPTION = range(8)
 
-# Путь к CSV-файлу для сохранения данных
-CSV_FILE_PATH = 'contacts.csv'
+# Путь к CSV-файлу в репозитории GitHub
+GITHUB_REPO = "gromykolina/myfirstbot"
+GITHUB_FILE_PATH = "contacts.csv"
+GITHUB_TOKEN = "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"
 
 # Приветственное изображение
 WELCOME_IMAGE_PATH = r'profile_icon2.png'
 
-# Запись данных в CSV-файл
-def save_to_csv(data):
+# Запись данных в файл на GitHub
+def save_to_github(data):
     try:
-        with open(CSV_FILE_PATH, mode='a', newline='', encoding='utf-8') as file:
-            writer = csv.writer(file)
-            writer.writerow(data)
+        # Получаем содержимое файла из репозитория
+        url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{GITHUB_FILE_PATH}"
+        headers = {"Authorization": f"token {GITHUB_TOKEN}"}
+        response = requests.get(url, headers=headers)
+        response_data = response.json()
+
+        # Извлекаем SHA последней версии файла для обновления
+        sha = response_data.get("sha")
+
+        # Декодируем содержимое файла
+        content = response_data.get("content")
+        if content:
+            content = base64.b64decode(content).decode('utf-8')
+        else:
+            content = ""
+
+        # Добавляем новые данные к содержимому
+        csv_data = content + ','.join(data) + "\n"
+
+        # Кодируем обновленные данные в base64
+        updated_content = base64.b64encode(csv_data.encode('utf-8')).decode('utf-8')
+
+        # Подготовка данных для запроса
+        data = {
+            "message": "Update contacts.csv",
+            "content": updated_content,
+            "sha": sha
+        }
+
+        # Обновляем файл в репозитории
+        response = requests.put(url, headers=headers, json=data)
+        response.raise_for_status()
+        logger.info("Данные успешно сохранены на GitHub.")
     except Exception as e:
-        logger.error(f"Ошибка при записи в CSV-файл: {e}")
+        logger.error(f"Ошибка при сохранении данных на GitHub: {e}")
 
 # Стартовая функция
 async def start(update: Update, context: CallbackContext) -> int:
