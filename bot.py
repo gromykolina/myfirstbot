@@ -1,4 +1,4 @@
-mport logging
+import logging
 import csv
 import base64
 import requests
