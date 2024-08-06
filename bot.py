@@ -28,8 +28,10 @@ def save_to_github(data):
         url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{GITHUB_FILE_PATH}"
         headers = {"Authorization": f"token {GITHUB_TOKEN}"}
         response = requests.get(url, headers=headers)
+        response.raise_for_status()
         response_data = response.json()
 
+        # Проверяем, был ли файл найден
         if response.status_code == 404:
             # Файл не существует, создаем новый
             sha = None
@@ -37,7 +39,11 @@ def save_to_github(data):
         else:
             # Файл существует, получаем его SHA и содержимое
             sha = response_data.get("sha")
-            content = base64.b64decode(response_data.get("content")).decode('utf-8')
+            content = response_data.get("content")
+            if content:
+                content = base64.b64decode(content).decode('utf-8')
+            else:
+                content = ""
 
         # Добавляем новые данные к содержимому
         csv_data = content + ','.join(data) + "\n"
@@ -46,14 +52,14 @@ def save_to_github(data):
         updated_content = base64.b64encode(csv_data.encode('utf-8')).decode('utf-8')
 
         # Подготовка данных для запроса
-        data = {
+        update_data = {
             "message": "Update contacts.csv",
             "content": updated_content,
             "sha": sha
         }
 
         # Обновляем файл в репозитории
-        response = requests.put(url, headers=headers, json=data)
+        response = requests.put(url, headers=headers, json=update_data)
         response.raise_for_status()
         logger.info("Данные успешно сохранены на GitHub.")
     except Exception as e:
@@ -219,7 +225,7 @@ async def save_and_send_checklist(update: Update, context: CallbackContext):
             user_data.get('issues_description', '')
         ]
         save_to_github(data)
-        await update.message.reply_text("Ваш чек-лист сохранен! Спасибо за ответы.")
+        await update.message.reply_text(f'Спасибо за ваши ответы, {context.user_data["name"]}! Вот ваш чек-лист: https://docs.google.com/document/d/1ww4O3izw5pWOKooqbsSGOIaTx8n1hAiKLK0txoMRdHM/edit?usp=sharing. Удачи в эффективном построении команды!')
     except Exception as e:
         logger.error(f"Ошибка при сохранении данных и отправке чек-листа: {e}")
         await update.message.reply_text("Произошла ошибка. Попробуйте еще раз.")
