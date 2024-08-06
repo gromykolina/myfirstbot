@@ -1,5 +1,4 @@
 import logging
-import csv
 import base64
 import requests
 from telegram import Update, KeyboardButton, ReplyKeyboardMarkup, InputFile
@@ -31,15 +30,14 @@ def save_to_github(data):
         response = requests.get(url, headers=headers)
         response_data = response.json()
 
-        # Извлекаем SHA последней версии файла для обновления
-        sha = response_data.get("sha")
-
-        # Декодируем содержимое файла
-        content = response_data.get("content")
-        if content:
-            content = base64.b64decode(content).decode('utf-8')
-        else:
+        if response.status_code == 404:
+            # Файл не существует, создаем новый
+            sha = None
             content = ""
+        else:
+            # Файл существует, получаем его SHA и содержимое
+            sha = response_data.get("sha")
+            content = base64.b64decode(response_data.get("content")).decode('utf-8')
 
         # Добавляем новые данные к содержимому
         csv_data = content + ','.join(data) + "\n"
@@ -202,107 +200,55 @@ async def get_issues_description(update: Update, context: CallbackContext) -> in
         await save_and_send_checklist(update, context)
         return ConversationHandler.END
     except Exception as e:
-        logger.error(f"Ошибка при уточнении проблем с командой: {e}")
+        logger.error(f"Ошибка при описании трудностей: {e}")
         await update.message.reply_text("Произошла ошибка. Попробуйте еще раз.")
         return ConversationHandler.END
 
 # Сохранение данных и отправка чек-листа
-async def save_and_send_checklist(update: Update, context: CallbackContext) -> None:
+async def save_and_send_checklist(update: Update, context: CallbackContext):
     try:
+        user_data = context.user_data
         data = [
-            context.user_data.get('name'),
-            context.user_data.get('phone'),
-            context.user_data.get('role'),
-            context.user_data.get('marketplace'),
-            context.user_data.get('management'),
-            context.user_data.get('team'),
-            context.user_data.get('issues'),
-            context.user_data.get('issues_description')
+            user_data.get('name', ''),
+            user_data.get('phone', ''),
+            user_data.get('role', ''),
+            user_data.get('marketplace', ''),
+            user_data.get('management', ''),
+            user_data.get('team', ''),
+            user_data.get('issues', ''),
+            user_data.get('issues_description', '')
         ]
-        save_to_csv(data)
-        await update.message.reply_text(
-            f'Спасибо за ваши ответы, {context.user_data["name"]}! Вот ваш чек-лист: https://docs.google.com/document/d/1ww4O3izw5pWOKooqbsSGOIaTx8n1hAiKLK0txoMRdHM/edit?usp=sharing. Удачи в эффективном построении команды!'
-        )
+        save_to_github(data)
+        await update.message.reply_text("Ваш чек-лист сохранен! Спасибо за ответы.")
     except Exception as e:
         logger.error(f"Ошибка при сохранении данных и отправке чек-листа: {e}")
         await update.message.reply_text("Произошла ошибка. Попробуйте еще раз.")
 
-# Отмена диалога
-async def cancel(update: Update, context: CallbackContext) -> int:
-    try:
-        await update.message.reply_text('Диалог завершен. Если захотите начать заново, напишите /start.')
-    except Exception as e:
-        logger.error(f"Ошибка при отмене диалога: {e}")
-        await update.message.reply_text("Произошла ошибка. Попробуйте еще раз.")
-    return ConversationHandler.END
+# Основная функция
+def main():
+    # Создание и запуск бота
+    application = Application.builder().token("7409762233:AAExIGMf0Ulz_Wx74SzU01S9VbUObX952Z0").build()
 
-# Перезапуск диалога
-async def restart(update: Update, context: CallbackContext) -> int:
-    try:
-        await update.message.reply_text('Диалог перезапущен. Давайте начнем с начала.')
-        return await start(update, context)
-    except Exception as e:
-        logger.error(f"Ошибка при перезапуске диалога: {e}")
-        await update.message.reply_text("Произошла ошибка. Попробуйте еще раз.")
-        return ConversationHandler.END
+    # Определение обработчиков
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler('start', start)],
+        states={
+            NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_name)],
+            PHONE: [MessageHandler(filters.CONTACT, get_phone)],
+            ROLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_role)],
+            MARKETPLACE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_marketplace)],
+            MANAGEMENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_management)],
+            TEAM: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_team)],
+            ISSUES: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_issues)],
+            ISSUES_DESCRIPTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_issues_description)],
+        },
+        fallbacks=[CommandHandler('cancel', start)],
+    )
 
-# Команда помощи
-async def help_command(update: Update, context: CallbackContext) -> None:
-    try:
-        await update.message.reply_text(
-            "Доступные команды:\n"
-            "/start - Начать взаимодействие\n"
-            "/cancel - Завершить диалог\n"
-            "/restart - Перезапустить диалог\n"
-            "/help - Получить помощь\n"
-            "/info - Информация о боте"
-        )
-    except Exception as e:
-        logger.error(f"Ошибка при выполнении команды помощи: {e}")
-        await update.message.reply_text("Произошла ошибка. Попробуйте еще раз.")
+    application.add_handler(conv_handler)
 
-# Команда информации
-async def info_command(update: Update, context: CallbackContext) -> None:
-    try:
-        await update.message.reply_text(
-            "Этот бот создан для того, чтобы помочь вам с построением эффективной команды. "
-            "Мы предоставляем полезные чек-листы и советы."
-        )
-    except Exception as e:
-        logger.error(f"Ошибка при выполнении команды информации: {e}")
-        await update.message.reply_text("Произошла ошибка. Попробуйте еще раз.")
-
-# Основная функция для запуска бота
-def main() -> None:
-    try:
-        # Замените 'YOUR_BOT_TOKEN' на токен вашего бота
-        application = Application.builder().token("7409762233:AAExIGMf0Ulz_Wx74SzU01S9VbUObX952Z0").build()
-
-        # Определяем ConversationHandler
-        conv_handler = ConversationHandler(
-            entry_points=[CommandHandler('start', start)],
-            states={
-                NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_name)],
-                PHONE: [MessageHandler(filters.CONTACT, get_phone)],
-                ROLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_role)],
-                MARKETPLACE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_marketplace)],
-                MANAGEMENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_management)],
-                TEAM: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_team)],
-                ISSUES: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_issues)],
-                ISSUES_DESCRIPTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_issues_description)],
-            },
-            fallbacks=[CommandHandler('cancel', cancel), CommandHandler('restart', restart)],
-        )
-
-        # Регистрация обработчиков команд
-        application.add_handler(conv_handler)
-        application.add_handler(CommandHandler('help', help_command))
-        application.add_handler(CommandHandler('info', info_command))
-
-        # Запуск бота
-        application.run_polling()
-    except Exception as e:
-        logger.error(f"Ошибка при запуске бота: {e}")
+    # Запуск бота
+    application.run_polling()
 
 if __name__ == '__main__':
     main()
